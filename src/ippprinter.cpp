@@ -204,6 +204,9 @@ bool IppPrinter::print(QJsonObject attrs, QString filename){
         return false;
 
     QFileInfo fileinfo(file);
+    file.close();
+
+
     QNetworkRequest request;
 
     request.setUrl(httpUrl());
@@ -227,11 +230,50 @@ bool IppPrinter::print(QJsonObject attrs, QString filename){
     IppMsg job = IppMsg(o, attrs);
 
     QByteArray contents = job.encode(IppMsg::PrintJob);
-    QByteArray filedata = file.readAll();
-    contents = contents.append(filedata);
+//    QByteArray filedata = file.readAll();
+//    contents = contents.append(filedata);
+
+    QProcess* muraster = new QProcess(this);
+    muraster->setProgram("/home/nemo/stuff/bin/muraster");
+    muraster->setArguments({"-F", "pgm", filename});
+
+
+    QProcess* ppm2pwg = new QProcess(this);
+    ppm2pwg->setProgram("/home/nemo/repos/pwg/ppm2pwg");
+    ppm2pwg->setEnvironment({"URF=true"});
+
+    muraster->setStandardOutputProcess(ppm2pwg);
+
+    muraster->start();
+    ppm2pwg->start();
+
+    if(!muraster->waitForStarted())
+    {
+        qDebug() << "derp";
+        return 0;
+    }
+
+    bool retval = false;
+
+    // TDOD: cleanup, what even is this?
+    while ((retval == ppm2pwg->waitForFinished()));
+        contents.append(ppm2pwg->readAll());
+
+    if (!retval) {
+        qDebug() << "Process error:" << ppm2pwg->errorString();
+//        return 1;
+    }
+
+
+    delete muraster;
+    delete ppm2pwg;
+
+    //TODO: hand over ppm2pwg as input to post(), delete both some time later
+
+    qDebug() << contents.length();
 
     _print_nam->post(request, contents);
-    file.close();
+//    file.close();
     return true;
 }
 
