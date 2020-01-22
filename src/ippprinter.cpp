@@ -96,7 +96,6 @@ void IppPrinter::refresh() {
 
 void IppPrinter::getPrinterAttributesFinished(QNetworkReply *reply)
 {
-    qDebug() << reply->error() << reply->errorString() << reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toString();
     _attrs = QJsonObject();
     if(reply->error()  == QNetworkReply::NoError)
     {
@@ -204,8 +203,6 @@ bool IppPrinter::print(QJsonObject attrs, QString filename){
         return false;
 
     QFileInfo fileinfo(file);
-    file.close();
-
 
     QNetworkRequest request;
 
@@ -230,50 +227,70 @@ bool IppPrinter::print(QJsonObject attrs, QString filename){
     IppMsg job = IppMsg(o, attrs);
 
     QByteArray contents = job.encode(IppMsg::PrintJob);
-//    QByteArray filedata = file.readAll();
-//    contents = contents.append(filedata);
-
-    QProcess* muraster = new QProcess(this);
-    muraster->setProgram("/home/nemo/stuff/bin/muraster");
-    muraster->setArguments({"-F", "pgm", filename});
 
 
-    QProcess* ppm2pwg = new QProcess(this);
-    ppm2pwg->setProgram("/home/nemo/repos/pwg/ppm2pwg");
-    ppm2pwg->setEnvironment({"URF=true"});
-
-    muraster->setStandardOutputProcess(ppm2pwg);
-
-    muraster->start();
-    ppm2pwg->start();
-
-    if(!muraster->waitForStarted())
+    // TODO: do this only conditionally, and to the raster suppoerted/preferred
+    bool transcode = true;
+    if(transcode)
     {
-        qDebug() << "derp";
-        return 0;
+        file.close();
+
+        QTemporaryFile* tempfile = new QTemporaryFile();
+        tempfile->open();
+        tempfile->write(contents);
+        qDebug() << tempfile->fileName();
+        tempfile->close();
+
+        QProcess* muraster = new QProcess(this);
+        muraster->setProgram("/home/nemo/stuff/bin/muraster");
+        muraster->setArguments({"-F", "pgm", filename});
+
+
+        QProcess* ppm2pwg = new QProcess(this);
+        ppm2pwg->setProgram("/home/nemo/repos/pwg/ppm2pwg");
+        QStringList env {"PREPEND_FILE="+tempfile->fileName()};
+
+        bool apple = false;
+        if(apple)
+        {
+            env.append("URF=true");
+        }
+
+        ppm2pwg->setEnvironment(env);
+
+        muraster->setStandardOutputProcess(ppm2pwg);
+
+        connect(muraster, SIGNAL(finished(int, QProcess::ExitStatus)), muraster, SLOT(deleteLater()));
+        connect(ppm2pwg, SIGNAL(finished(int, QProcess::ExitStatus)), ppm2pwg, SLOT(deleteLater()));
+        connect(ppm2pwg, SIGNAL(finished(int, QProcess::ExitStatus)), tempfile, SLOT(deleteLater()));
+
+        muraster->start();
+        ppm2pwg->start();
+
+        if(!muraster->waitForStarted())
+        {
+            qDebug() << "muraster died";
+            return false;
+        }
+        if(!ppm2pwg->waitForStarted())
+        {
+            qDebug() << "ppm2pwg died";
+            return false;
+        }
+
+        _print_nam->post(request, ppm2pwg);
+    }
+    else {
+
+        QByteArray filedata = file.readAll();
+        contents = contents.append(filedata);
+        file.close();
+
+        _print_nam->post(request, contents);
     }
 
-    bool retval = false;
-
-    // TDOD: cleanup, what even is this?
-    while ((retval == ppm2pwg->waitForFinished()));
-        contents.append(ppm2pwg->readAll());
-
-    if (!retval) {
-        qDebug() << "Process error:" << ppm2pwg->errorString();
-//        return 1;
-    }
 
 
-    delete muraster;
-    delete ppm2pwg;
-
-    //TODO: hand over ppm2pwg as input to post(), delete both some time later
-
-    qDebug() << contents.length();
-
-    _print_nam->post(request, contents);
-//    file.close();
     return true;
 }
 

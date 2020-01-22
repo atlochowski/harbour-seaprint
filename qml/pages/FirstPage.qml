@@ -108,7 +108,8 @@ Page {
                 visible: false
 
                 property string name: printer.attrs["printer-name"].value != "" ? printer.attrs["printer-name"].value : qsTr("Unknown")
-                property bool canPrint: printer.attrs["document-format-supported"].value.indexOf(selectedFileType) != -1
+                // TODO: check  if conversion targets are supported if file is PDF
+                property bool canPrint: printer.attrs["document-format-supported"].value.indexOf(selectedFileType) != -1 || selectedFileType == "application/pdf"
 
                 Connections {
                     target: printer
